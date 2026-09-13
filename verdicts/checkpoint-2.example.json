@@ -1,0 +1,7 @@
+[
+  {
+    "ref": "ac-1",
+    "resolution": "approved",
+    "reason": "Example only. Build the real file from `kane-cli context list --json --inferred` after design."
+  }
+]
