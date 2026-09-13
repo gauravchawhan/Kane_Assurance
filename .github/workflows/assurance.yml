@@ -69,8 +69,9 @@ jobs:
       # it never sees .testmuai/tests — that is an empty/invalid plan (exit 2)
       # in under a second. Pass the files explicitly. Credentials also go on
       # testrun itself (CI docs: do not rely on a prior `login` session).
-      # Failed tests are results, not pipeline errors: stay green on exit 1
-      # when testrun_done arrived. Exit 2 (nothing ran) still fails the job.
+      # `testrun run` has no --variables-file flag; values come from
+      # .testmuai/variables/*.json (auto-loaded). Failed tests are results,
+      # not pipeline errors: stay green on exit 1 when testrun_done arrived.
       - name: Run the assurance test suite
         id: testrun
         env:
@@ -94,8 +95,7 @@ jobs:
             --on-failure continue \
             --username "$LT_USERNAME" \
             --access-key "$LT_ACCESS_KEY" \
-            --variables-file .testmuai/variables/runtime.json \
-            --name "CI run #${{ github.run_number }} (${{ github.sha }})" \
+            --name "CI-run-${{ github.run_number }}" \
             2>&1 | tee testrun.log
           code=${PIPESTATUS[0]}
 
