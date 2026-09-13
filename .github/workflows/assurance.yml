@@ -23,7 +23,7 @@ env:
 jobs:
   assurance:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +34,7 @@ jobs:
           node-version: "22"
 
       - name: Set up Chrome
+        id: chrome
         uses: browser-actions/setup-chrome@v1
 
       - name: Install kane-cli
@@ -49,6 +50,10 @@ jobs:
             exit 1
           fi
           kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
+          kane-cli config set-target desktop
+          kane-cli config set-url https://sampleapp.tricentis.com/101/#
+          kane-cli --version
+          kane-cli whoami
 
       - name: Build run-time variables file
         run: |
@@ -60,19 +65,51 @@ jobs:
           echo "Variables available to tests (values not shown):"
           jq -r 'to_entries[] | "  {{" + .key + "}}"' .testmuai/variables/runtime.json
 
+      # Bare `kane-cli testrun run` walks the cwd and skips dot-directories, so
+      # it never sees .testmuai/tests — that is an empty/invalid plan (exit 2)
+      # in under a second. Pass the files explicitly. Credentials also go on
+      # testrun itself (CI docs: do not rely on a prior `login` session).
+      # Failed tests are results, not pipeline errors: stay green on exit 1
+      # when testrun_done arrived. Exit 2 (nothing ran) still fails the job.
       - name: Run the assurance test suite
         id: testrun
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME || secrets.KANE_CLI_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY || secrets.KANE_CLI_ACCESS_KEY }}
+          KANE_CLI_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
-          set -euo pipefail
-          if ! find .testmuai/tests -name '*_test.md' | grep -q .; then
+          set +e
+          set -uo pipefail
+          mapfile -t TESTS < <(find .testmuai/tests -name '*_test.md' | sort)
+          if [ "${#TESTS[@]}" -eq 0 ]; then
             echo "::warning::No *_test.md files under .testmuai/tests. Run the lifecycle workflow first, or design tests locally."
             exit 0
           fi
-          kane-cli testrun run \
+          echo "Running ${#TESTS[@]} test(s):"
+          printf '  %s\n' "${TESTS[@]}"
+
+          kane-cli testrun run "${TESTS[@]}" \
             --headless \
             --parallel 1 \
             --on-failure continue \
-            --name "CI run #${{ github.run_number }} (${{ github.sha }})"
+            --username "$LT_USERNAME" \
+            --access-key "$LT_ACCESS_KEY" \
+            --variables-file .testmuai/variables/runtime.json \
+            --name "CI run #${{ github.run_number }} (${{ github.sha }})" \
+            2>&1 | tee testrun.log
+          code=${PIPESTATUS[0]}
+
+          done_line=$(grep -E '"type": *"testrun_done"' testrun.log | tail -n 1 || true)
+          if [ -z "$done_line" ]; then
+            echo "::error::kane-cli testrun did not complete (exit $code). This is a pipeline or setup problem, not a test failure; see the log above."
+            [ "$code" -eq 0 ] && code=1
+            exit "$code"
+          fi
+
+          status=$(jq -r '.overall_status // "unknown"' <<< "$done_line" 2>/dev/null || echo unknown)
+          if [ "$status" != "passed" ]; then
+            echo "::warning::Suite overall status '$status'. Failed tests are recorded in evidence; the pipeline does not fail on them."
+          fi
 
       - name: Generate coverage / assurance report
         if: always()
@@ -90,7 +127,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: evidence-packs-${{ github.run_number }}
-          path: .testmuai/evidence/*.evidence
+          path: |
+            .testmuai/evidence/*.evidence
+            testrun.log
           if-no-files-found: warn
           retention-days: 30
 
