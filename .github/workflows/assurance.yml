@@ -1,0 +1,104 @@
+name: Vehicle Insurance Assurance Suite
+
+# Runs already-designed *_test.md files under .testmuai/tests (the path used
+# by CLI-Assurance-BFSI and kaneCLIassurance). This does NOT ingest or design
+# — use kane-cli-assurance.yml for the full lifecycle.
+#
+# Required repo secrets:
+#   LT_USERNAME / LT_ACCESS_KEY   or   KANE_CLI_USERNAME / KANE_CLI_ACCESS_KEY
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - ".testmuai/tests/**"
+      - ".github/workflows/assurance.yml"
+      - "kane-variables.seed.json"
+
+env:
+  KANE_CLI_VERSION: "@testmuai/kane-cli"
+  VARIABLES_SEED: "kane-variables.seed.json"
+
+jobs:
+  assurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install kane-cli
+        run: npm install -g ${{ env.KANE_CLI_VERSION }}
+
+      - name: Authenticate kane-cli
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME || secrets.KANE_CLI_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY || secrets.KANE_CLI_ACCESS_KEY }}
+        run: |
+          if [ -z "$LT_USERNAME" ] || [ -z "$LT_ACCESS_KEY" ]; then
+            echo "::error::Set LT_USERNAME + LT_ACCESS_KEY (or KANE_CLI_USERNAME + KANE_CLI_ACCESS_KEY)."
+            exit 1
+          fi
+          kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
+
+      - name: Build run-time variables file
+        run: |
+          set -euo pipefail
+          mkdir -p .testmuai/variables
+          SEED="$VARIABLES_SEED"
+          [ -f "$SEED" ] || SEED=/dev/null
+          jq -n --slurpfile seed "$SEED" '($seed[0] // {})' > .testmuai/variables/runtime.json
+          echo "Variables available to tests (values not shown):"
+          jq -r 'to_entries[] | "  {{" + .key + "}}"' .testmuai/variables/runtime.json
+
+      - name: Run the assurance test suite
+        id: testrun
+        run: |
+          set -euo pipefail
+          if ! find .testmuai/tests -name '*_test.md' | grep -q .; then
+            echo "::warning::No *_test.md files under .testmuai/tests. Run the lifecycle workflow first, or design tests locally."
+            exit 0
+          fi
+          kane-cli testrun run \
+            --headless \
+            --parallel 1 \
+            --on-failure continue \
+            --name "CI run #${{ github.run_number }} (${{ github.sha }})"
+
+      - name: Generate coverage / assurance report
+        if: always()
+        run: |
+          {
+            echo "## Coverage — proof pack"
+            kane-cli cover || true
+            echo
+            echo "## Coverage — designed x proven, per use case"
+            kane-cli cover gaps || true
+          } | tee assurance-coverage-report.txt
+
+      - name: Upload evidence packs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-packs-${{ github.run_number }}
+          path: .testmuai/evidence/*.evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ github.run_number }}
+          path: assurance-coverage-report.txt
+          if-no-files-found: warn
+          retention-days: 90

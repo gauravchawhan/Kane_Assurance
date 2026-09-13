@@ -1,0 +1,7 @@
+[
+  {
+    "ref": "uc-choose-an-insurance-product",
+    "resolution": "approved",
+    "reason": "Cited to R1 on the home-page catalogue. Replace this ref with the id from `kane-cli context list --json` — ids are not stable between runs."
+  }
+]

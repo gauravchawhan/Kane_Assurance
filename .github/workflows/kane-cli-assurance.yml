@@ -1,0 +1,99 @@
+name: Kane CLI Assurance — Vehicle Insurance
+
+# Runs the kane-cli assurance lifecycle (capture -> extract -> review ->
+# design -> review -> author -> measure) against sources/feature-spec.md and
+# publishes designed/proven coverage, generated tests, and sealed evidence
+# as workflow artifacts + a job summary.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   LT_USERNAME     your LambdaTest / TestMu AI username
+#   LT_ACCESS_KEY   your access key (Dashboard -> Credentials)
+#
+# See README.md for setup and scripts/run-assurance.sh for the stage-by-stage logic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_reconcile:
+        description: "Also run the requirements-change demo (maintain reconcile against feature-spec-v2.md)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "sources/**"
+      - "bfsFile.md"
+      - ".github/workflows/kane-cli-assurance.yml"
+  schedule:
+    # Weekly regression, Monday 03:00 UTC — same cadence as kaneCLIassurance
+    - cron: "0 3 * * 1"
+
+concurrency:
+  group: kane-cli-assurance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  assurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Ensure Google Chrome is available
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y wget gnupg
+            wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable
+          fi
+          google-chrome --version
+
+      - name: Install kane-cli
+        run: npm install -g @testmuai/kane-cli@latest
+
+      - name: Verify kane-cli
+        run: kane-cli --version
+
+      - name: Install kane-cli skill
+        run: kane-cli install skill || echo "::warning::'kane-cli install skill' failed or is not needed on this version — continuing."
+
+      - name: Authenticate
+        env:
+          LT_USERNAME: ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+        run: |
+          if [ -z "$LT_USERNAME" ] || [ -z "$LT_ACCESS_KEY" ]; then
+            echo "::error::LT_USERNAME and/or LT_ACCESS_KEY secrets are not set. See README.md."
+            exit 1
+          fi
+          kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
+
+      - name: Run assurance lifecycle
+        env:
+          MAX_DESIGN: 4
+        run: bash scripts/run-assurance.sh
+
+      - name: Run requirements-change demo (maintain reconcile)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_reconcile == true }}
+        run: bash scripts/run-reconcile.sh
+
+      - name: Upload evidence & results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kane-cli-assurance-evidence-${{ github.run_number }}
+          path: |
+            run/**
+            .testmuai/tests/**
+            .testmuai/evidence/**
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,16 @@
+# kane-cli store — append-only, not git-mergeable
+.context/
+.context.*/
+
+# Run output (not source). CI publishes these as workflow artifacts.
+.testmuai/evidence/
+.testmuai/tests/output-*/
+.testmuai/variables/
+.testmuai/rook/
+
+# Lifecycle run logs and dated reports
+run/
+*.ndjson
+
+node_modules/
+.DS_Store
