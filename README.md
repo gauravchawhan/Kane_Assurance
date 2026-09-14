@@ -58,12 +58,15 @@ kane-cli cover gaps
 
 ## GitHub Actions
 
-1. Add secrets `LT_USERNAME` and `LT_ACCESS_KEY`.
-2. **Kane CLI Assurance — Vehicle Insurance** designs and authors from
-   `sources/feature-spec.md` (same pattern as
-   [N_KaneCLI_Assurance run #8](https://github.com/naveentestmuai-source/N_KaneCLI_Assurance/actions/runs/34610878020)).
-3. **Vehicle Insurance Assurance Suite** replays committed `*_test.md` files
-   (same pattern as kaneCLIassurance / CLI-Assurance-BFSI).
+1. Add secrets `LT_USERNAME` and `LT_ACCESS_KEY` (aliases: `KANE_USERNAME` /
+   `KANE_ACCESS_KEY`). Same pairing as
+   [hitech-agenticflow](https://github.com/Themesto1994/hitech-agenticflow).
+2. **Kane CLI Assurance — Vehicle Insurance** designs from
+   `sources/feature-spec.md`.
+3. **Vehicle Insurance Assurance Suite** follows Hi Tech Phase 3: `testmd run`
+   authors each committed `*_test.md`, then `testrun run` seals one evidence
+   pack. Use **Run workflow** and set `max_tests_to_run` to `1` for a smoke
+   check. A full 18-test authoring pass can take hours.
 
 ## Keeping the suite current
 
